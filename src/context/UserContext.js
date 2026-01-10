@@ -23,7 +23,10 @@ export const UserProvider = ({ children }) => {
   const loadData = async () => {
     try {
       const storedIntents = await AsyncStorage.getItem('@intents');
+      const storedProfile = await AsyncStorage.getItem('@userProfile');
+
       if (storedIntents) setIntents(JSON.parse(storedIntents));
+      if (storedProfile) setUserProfile(JSON.parse(storedProfile));
     } catch (e) {
       console.error("Failed to load accountability data.");
     }
@@ -39,6 +42,15 @@ export const UserProvider = ({ children }) => {
     }
   };
 
+  const saveProfile = async (newProfile) => {
+    try {
+      await AsyncStorage.setItem('@userProfile', JSON.stringify(newProfile));
+      setUserProfile(newProfile);
+    } catch (e) {
+      console.error("Failed to save profile.");
+    }
+  };
+
   // THE "QUICK START" BUILDER
   const addIntent = (word, roadmap, stake, eggDuration, persona) => {
     const newIntent = {
@@ -50,7 +62,10 @@ export const UserProvider = ({ children }) => {
       streak: 0,
       status: 'INCUBATING', // 'INCUBATING', 'HATCHED', 'TABLED'
       aiPersona: persona, // 'DRILL_SERGEANT', 'STOIC', 'FRIEND'
-      history: [] // Array of daily results
+      history: [], // Array of daily results
+      lastCheckIn: null,
+      totalCheckIns: 0,
+      successfulCheckIns: 0
     };
 
     const updatedIntents = [...intents, newIntent];
@@ -58,8 +73,99 @@ export const UserProvider = ({ children }) => {
     return newIntent;
   };
 
+  // GET INTENT BY ID
+  const getIntent = (intentId) => {
+    return intents.find(i => i.id === intentId);
+  };
+
+  // PROCESS CHECK-IN
+  const processCheckIn = async (intentId, checkInResult) => {
+    const updatedIntents = intents.map(intent => {
+      if (intent.id === intentId) {
+        const historyEntry = {
+          timestamp: checkInResult.timestamp,
+          success: checkInResult.success,
+          streak: checkInResult.newStreak,
+          data: checkInResult.data,
+          message: checkInResult.message
+        };
+
+        return {
+          ...intent,
+          streak: checkInResult.newStreak,
+          history: [...intent.history, historyEntry],
+          lastCheckIn: checkInResult.timestamp,
+          totalCheckIns: intent.totalCheckIns + 1,
+          successfulCheckIns: checkInResult.success
+            ? intent.successfulCheckIns + 1
+            : intent.successfulCheckIns
+        };
+      }
+      return intent;
+    });
+
+    await saveData(updatedIntents);
+  };
+
+  // UPDATE INTENT (for settings changes after hatch)
+  const updateIntent = async (intentId, updates) => {
+    const updatedIntents = intents.map(intent => {
+      if (intent.id === intentId) {
+        return { ...intent, ...updates };
+      }
+      return intent;
+    });
+    await saveData(updatedIntents);
+  };
+
+  // DELETE INTENT
+  const deleteIntent = async (intentId) => {
+    const updatedIntents = intents.filter(i => i.id !== intentId);
+    await saveData(updatedIntents);
+  };
+
+  // CHECK IF CAN CHECK IN TODAY
+  const canCheckInToday = (intent) => {
+    if (!intent.lastCheckIn) return true;
+
+    const lastCheckIn = new Date(intent.lastCheckIn);
+    const today = new Date();
+
+    // Check if last check-in was before today
+    return lastCheckIn.toDateString() !== today.toDateString();
+  };
+
+  // GET STATS
+  const getStats = () => {
+    const totalIntents = intents.length;
+    const totalCheckIns = intents.reduce((sum, i) => sum + i.totalCheckIns, 0);
+    const successRate = totalCheckIns > 0
+      ? (intents.reduce((sum, i) => sum + i.successfulCheckIns, 0) / totalCheckIns * 100).toFixed(1)
+      : 0;
+    const longestStreak = Math.max(...intents.map(i => i.streak), 0);
+
+    return {
+      totalIntents,
+      totalCheckIns,
+      successRate,
+      longestStreak,
+      credits: userProfile.credits
+    };
+  };
+
   return (
-    <UserContext.Provider value={{ intents, addIntent, userProfile, setUserProfile }}>
+    <UserContext.Provider value={{
+      intents,
+      addIntent,
+      getIntent,
+      processCheckIn,
+      updateIntent,
+      deleteIntent,
+      canCheckInToday,
+      getStats,
+      userProfile,
+      setUserProfile: saveProfile
+    }}>
       {children}
     </UserContext.Provider>
   );
